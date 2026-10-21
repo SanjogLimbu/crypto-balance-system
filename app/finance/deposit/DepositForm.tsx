@@ -18,26 +18,33 @@ export default function DepositForm() {
         setLoading(true)
         setError("")
 
-        const response = await fetch(
-            "/api/create-deposit",
-            {
-                method: "POST",
-                body: JSON.stringify({ amount: amountInput }),
+        try {
+            const response = await fetch(
+                "/api/create-deposit",
+                {
+                    method: "POST",
+                    body: JSON.stringify({ amount: amountInput }),
+                }
+            )
+
+
+            const data = await response.json().catch(() => ({}))
+
+            if (response.ok) {
+                // The deposit gets its own URL, so a reload or the back button brings the user back to it.
+                router.push(`/finance/deposit/${data.address}`)
+
+                return
             }
-        )
 
 
-        const data = await response.json().catch(() => ({}))
-
-        if (response.ok) {
-            // The deposit gets its own URL, so a reload or the back button brings the user back to it.
-            router.push(`/finance/deposit/${data.address}`)
-
-            return
+            setError(data.error ?? "Failed to create deposit")
+        }
+        catch {
+            setError("A network error occured.")
         }
 
 
-        setError(data.error ?? "Failed to create deposit")
         setLoading(false)
     }
 

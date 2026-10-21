@@ -6,7 +6,8 @@ import { Prisma } from "@/lib/generated/prisma/client"
 //
 
 export async function POST(request: Request) {
-    const { username, password } = await request.json()
+    // A body that is not JSON, or is null, becomes {} and fails the checks below.
+    const { username, password } = await request.json().catch(() => null) ?? {}
 
     if (typeof username !== "string" || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
         return NextResponse.json(

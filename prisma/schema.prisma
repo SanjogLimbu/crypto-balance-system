@@ -24,34 +24,34 @@ generator client {
 }
 
 model User {
-  id       String @id @default(cuid())
-  name     String @unique
-  password String
-  balanceUnits BigInt @default(0)
-  deposits crypto_deposit[]
-  withdrawals withdrawal[]
+  id           String           @id @default(cuid())
+  name         String           @unique
+  password     String
+  balanceUnits BigInt           @default(0)
+  deposits     crypto_deposit[]
+  withdrawals  withdrawal[]
 
   @@map("users")
 }
 
 model crypto_deposit {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  address    String   @unique
-  index      Int      @unique
-  amountUnits BigInt 
-  
-  txHash     String?
+  address     String @unique
+  index       Int    @unique
+  amountUnits BigInt
+
+  txHash      String?
   blockNumber BigInt?
 
-  status     DepositStatus @default(pending)
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  confirmedAt DateTime?
+  status         DepositStatus @default(pending)
+  expiresAt      DateTime
+  createdAt      DateTime      @default(now())
+  confirmedAt    DateTime?
   sweepStartedAt DateTime?
-  sweptAt DateTime?
+  sweptAt        DateTime?
 
   transfers deposit_transfer[]
 
@@ -60,33 +60,33 @@ model crypto_deposit {
 }
 
 model deposit_transfer {
-  id          String         @id @default(cuid())
+  id String @id @default(cuid())
 
-  depositId   String
-  deposit     crypto_deposit @relation(fields: [depositId], references: [id], onDelete: Cascade)
+  depositId String
+  deposit   crypto_deposit @relation(fields: [depositId], references: [id], onDelete: Cascade)
 
   txHash      String
   logIndex    Int
   amountUnits BigInt
   blockNumber BigInt
-  createdAt   DateTime       @default(now())
+  createdAt   DateTime @default(now())
 
   @@unique([txHash, logIndex])
   @@index([depositId])
 }
 
 model withdrawal {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   address     String
   amountUnits BigInt
   feeUnits    BigInt
   txHash      String?
 
-  status      WithdrawalStatus @default(pending)
-  createdAt   DateTime @default(now())
+  status    WithdrawalStatus @default(pending)
+  createdAt DateTime         @default(now())
 
   @@index([userId])
   @@index([status])

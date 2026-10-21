@@ -7,7 +7,7 @@ export const WITHDRAWAL_FEE_PERCENT = 2n
 export const DEPOSIT_WINDOW_MINUTES = 30
 
 export const MAX_BLOCK_RANGE = 2000n
-export const DEPOSIT_GRACE_MINUTES = 60 * 24
+export const DEPOSIT_GRACE_MINUTES = 60 * 24 * 3
 export const SWEEP_CLAIM_MINUTES = 5
 
 //

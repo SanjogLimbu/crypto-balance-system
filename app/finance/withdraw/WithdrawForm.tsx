@@ -39,32 +39,39 @@ export default function WithdrawForm({ balanceUnits }: { balanceUnits: string })
         setLoading(true)
         setError("")
 
-        const response = await fetch(
-            "/api/withdraw",
-            {
-                method: "POST",
-                body: JSON.stringify(
-                    { 
-                        amount: amountInput,
-                        address 
-                    }
-                ),
+        try {
+            const response = await fetch(
+                "/api/withdraw",
+                {
+                    method: "POST",
+                    body: JSON.stringify(
+                        { 
+                            amount: amountInput,
+                            address 
+                        }
+                    ),
+                }
+            )
+
+
+            const data = await response.json().catch(() => ({}))
+
+            
+            // Only a reply with a transaction hash counts as sent; an unknown route redirects and still answers 200.
+            if (response.ok && data.transactionHash) {
+                setResult(data)
+
+                return
             }
-        )
 
 
-        const data = await response.json().catch(() => ({}))
-
-        
-        // Only a reply with a transaction hash counts as sent; an unknown route redirects and still answers 200.
-        if (response.ok && data.transactionHash) {
-            setResult(data)
-
-            return
+            setError(data.error ?? "Withdrawal failed")
+        }
+        catch {
+            setError("A network error occured.")
         }
 
 
-        setError(data.error ?? "Withdrawal failed")
         setLoading(false)
     }
 

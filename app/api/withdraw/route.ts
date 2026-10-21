@@ -18,7 +18,8 @@ export async function POST(request: Request) {
     }
 
 
-    const data = await request.json()
+    // A body that is not JSON, or is null, becomes {} and fails the checks below.
+    const data = await request.json().catch(() => null) ?? {}
     const amount = data.amount
     const address = data.address
 

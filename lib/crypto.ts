@@ -185,6 +185,7 @@ function creditDeposit(
             },
         })
 
+        
         return true
     })
 }
@@ -427,7 +428,6 @@ export async function sweepDeposits() {
 }
 
 
-// Returns null when the balance is too low. Throws when the payout did not go through.
 export async function processWithdraw(userId: string, amountUnits: bigint, address: `0x${string}`) {
     const feeUnits = amountUnits * WITHDRAWAL_FEE_PERCENT / 100n
     const netUnits = amountUnits - feeUnits
@@ -439,14 +439,17 @@ export async function processWithdraw(userId: string, amountUnits: bigint, addre
             data: { balanceUnits: { decrement: amountUnits } },
         })
 
+
         if (count === 0) {
             return null
         }
+
 
         return tx.withdrawal.create({ 
             data: { userId, address, amountUnits, feeUnits } 
         })
     })
+
 
     if (!withdrawal) {
         return null
@@ -465,6 +468,7 @@ export async function processWithdraw(userId: string, amountUnits: bigint, addre
             data: { balanceUnits: { increment: amountUnits } } 
         }),
     ])
+
 
     const wallet = walletClient(mainAccount())
     let transactionHash: `0x${string}`
