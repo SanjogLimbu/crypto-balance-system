@@ -23,6 +23,23 @@ export default async function Finance() {
     })
 
 
+    const entries = await prisma.balance_entry.findMany({
+        where: {
+            userId: session.user.id,
+        },
+        orderBy: {
+            createdAt: "desc",
+        },
+        take: 50,
+        select: {
+            id: true,
+            type: true,
+            amountUnits: true,
+            createdAt: true,
+        },
+    })
+
+
     return (
         <div className="w-full max-w-md">
             <div className="card p-6">
@@ -54,6 +71,48 @@ export default async function Finance() {
                     >
                         Withdraw
                     </Link>
+                </div>
+            </div>
+
+            <div className="card mt-10 p-6">
+                <p className="label">
+                    Ledger
+                </p>
+
+                <div className="mt-4 divide-y divide-white/10">
+                    {entries.length === 0 ? (
+                        <p className="py-4 text-sm text-muted">
+                            No transactions yet.
+                        </p>
+                    ) : (
+                        entries.map((entry) => (
+                            <div
+                                key={entry.id}
+                                className="flex items-center justify-between gap-4 py-4"
+                            >
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium capitalize">
+                                        {entry.type}
+                                    </p>
+
+                                    <time
+                                        dateTime={entry.createdAt.toISOString()}
+                                        className="text-xs text-muted"
+                                    >
+                                        {entry.createdAt.toLocaleString("en-GB", {
+                                            dateStyle: "medium",
+                                            timeStyle: "short",
+                                            timeZone: "UTC",
+                                        })} UTC
+                                    </time>
+                                </div>
+
+                                <p className="shrink-0 text-sm font-medium tabular-nums">
+                                    {unitsToUsdc(entry.amountUnits)} USDC
+                                </p>
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
 

@@ -216,22 +216,16 @@ export async function processDeposits() {
     })
 
 
-    // Continue from the block after the last one scanned.
     let fromBlock = counter.lastBlock + 1n
 
-
-    // First run: nothing scanned yet, so start MAX_BLOCK_RANGE blocks back.
     if (counter.lastBlock === 0n) {
         fromBlock = finalized - MAX_BLOCK_RANGE + 1n
     }
 
 
-    // Scan past the finalized block so a transfer shows as detected before it can be credited.
     let toBlock = latest
     let credited = 0
 
-
-    // An empty address filter would match every USDC transfer, so skip the scan instead.
     if (watched.length > 0 && fromBlock <= latest) {
         if (latest - fromBlock >= MAX_BLOCK_RANGE) {
             toBlock = fromBlock + MAX_BLOCK_RANGE - 1n
@@ -251,13 +245,11 @@ export async function processDeposits() {
         for (const log of logs) {
             const deposit = watched.find(deposit => deposit.address.toLowerCase() === log.args.to.toLowerCase())
 
-            // Zero-value transfers are free to spam, so anything under the minimum is ignored.
             if (!deposit || log.args.value < MIN_AMOUNT_UNITS) {
                 continue
             }
 
 
-            // Not final yet: only mark it as detected, a later run credits it.
             if (log.blockNumber > finalized) {
                 await prisma.crypto_deposit.updateMany({
                     where: { 
@@ -283,11 +275,8 @@ export async function processDeposits() {
     }
 
 
-    // The cursor never passes the finalized block, so unfinalized blocks are scanned again next run.
     const lastBlock = toBlock < finalized ? toBlock : finalized
 
-
-    // A detected transfer that is missing from its now-final block was reorged out.
     await prisma.crypto_deposit.updateMany({
         where: { 
             status: "detected", 
@@ -312,7 +301,6 @@ export async function processDeposits() {
     })
 
 
-    // Saved last: if a run dies before this, the same blocks are scanned again and creditDeposit skips what it already did.
     await prisma.deposit_counter.update({ 
         where: { 
             id: "global" 
@@ -337,6 +325,7 @@ export async function sweepDeposits() {
 
     for (const deposit of deposits) {
         const claimedAt = new Date()
+
 
         // Check if deposit is free and write it as claimed happen in a single step to avoid collisions. 
         // Crashes may occur so if sweep started more than SWEEP_CLAIM_MINUTES ago, but its status is not updated, assume it crashed and allow takeover.
@@ -372,9 +361,6 @@ export async function sweepDeposits() {
             // Nothing left means an earlier run already moved it but died before saving that.
             if (balance > 0n) {
                 const transfer = usdcTransfer(MAIN_WALLET_ADDRESS, balance)
-
-
-                // Price the transfer at current gas fees, since a fixed top-up breaks when fees spike.
                 const gas = await publicClient.estimateContractGas({ ...transfer, account: account.address })
                 const { maxFeePerGas, maxPriorityFeePerGas } = await publicClient.estimateFeesPerGas()
                 const gasCost = gas * maxFeePerGas
@@ -393,32 +379,39 @@ export async function sweepDeposits() {
                 const hash = await walletClient(account).writeContract({ ...transfer, gas, maxFeePerGas, maxPriorityFeePerGas })
                 const receipt = await publicClient.waitForTransactionReceipt({ hash })
 
-
-                // A reverted transaction still has a receipt.
                 if (receipt.status !== "success") {
                     throw new Error(`sweep transfer reverted: ${hash}`)
                 }
             }
 
 
-            // Only while the claim is still ours: a transfer credited meanwhile cleared it, and its USDC may still be here.
-            await prisma.crypto_deposit.updateMany({
-                where: {
-                    id: deposit.id,
-                    status: "confirmed",
-                    sweepStartedAt: claimedAt
-                },
-                data: {
-                    status: "swept",
-                    sweptAt: new Date() 
-                },
-            })
+            await prisma.$transaction([
+                prisma.crypto_deposit.update({
+                    where: {
+                        id: deposit.id,
+                        status: "confirmed",
+                        sweepStartedAt: claimedAt
+                    },
+                    data: {
+                        status: "swept",
+                        sweptAt: new Date() 
+                    },
+                }),
+
+                prisma.balance_entry.create({ 
+                    data: { 
+                        userId: deposit.userId,
+                        operationRef: deposit.id, 
+                        type: "deposit",
+                        amountUnits: deposit.amountUnits
+                    },
+                }),
+            ])
 
 
             swept++
         }
         catch (error) {
-            // It stays confirmed and is retried once the claim lapses.
             console.error(`[sweep] deposit ${deposit.id} failed:`, error)
         }
     }
@@ -432,11 +425,15 @@ export async function processWithdraw(userId: string, amountUnits: bigint, addre
     const feeUnits = amountUnits * WITHDRAWAL_FEE_PERCENT / 100n
     const netUnits = amountUnits - feeUnits
 
-    // Take the money and record the withdrawal together, so a crash cannot leave one without the other.
     const withdrawal = await prisma.$transaction(async (tx) => {
         const { count } = await tx.user.updateMany({
-            where: { id: userId, balanceUnits: { gte: amountUnits } },
-            data: { balanceUnits: { decrement: amountUnits } },
+            where: { 
+                id: userId, 
+                balanceUnits: { gte: amountUnits } 
+            },
+            data: { 
+                balanceUnits: { decrement: amountUnits } 
+            },
         })
 
 
@@ -465,7 +462,9 @@ export async function processWithdraw(userId: string, amountUnits: bigint, addre
 
         prisma.user.update({ 
             where: { id: userId }, 
-            data: { balanceUnits: { increment: amountUnits } } 
+            data: { 
+                balanceUnits: { increment: amountUnits } 
+            } 
         }),
     ])
 
@@ -477,14 +476,12 @@ export async function processWithdraw(userId: string, amountUnits: bigint, addre
         transactionHash = await wallet.writeContract(usdcTransfer(address, netUnits))
     }
     catch (error) {
-        // The transfer was not sent, so nothing was paid out.
         await refund()
 
         throw error
     }
 
 
-    // Saved straight away: from here on the hash is how to find out what happened.
     await prisma.withdrawal.update({ 
         where: { id: withdrawal.id }, 
         data: { txHash: transactionHash } 
@@ -501,10 +498,21 @@ export async function processWithdraw(userId: string, amountUnits: bigint, addre
     }
 
 
-    await prisma.withdrawal.update({ 
-        where: { id: withdrawal.id }, 
-        data: { status: "completed" } 
-    })
+    prisma.$transaction([
+        prisma.withdrawal.update({ 
+            where: { id: withdrawal.id }, 
+            data: { status: "completed" } 
+        }),
+
+        prisma.balance_entry.create({ 
+            data: { 
+                userId,
+                operationRef: withdrawal.id, 
+                type: "withdrawal",
+                amountUnits
+            },
+        }),
+    ])
 
 
     // Best effort: if this fails the fee simply stays in the main wallet.

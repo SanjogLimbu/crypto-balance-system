@@ -12,6 +12,11 @@ enum WithdrawalStatus {
   failed
 }
 
+enum BalanceEntryType {
+  deposit
+  withdrawal
+}
+
 //
 
 datasource db {
@@ -28,10 +33,23 @@ model User {
   name         String           @unique
   password     String
   balanceUnits BigInt           @default(0)
+  ledger       balance_entry[]
   deposits     crypto_deposit[]
   withdrawals  withdrawal[]
 
   @@map("users")
+}
+
+model balance_entry {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id])
+  type         BalanceEntryType
+  amountUnits  BigInt
+  createdAt    DateTime         @default(now())
+  operationRef String           @unique
+
+  @@index([userId, createdAt])
 }
 
 model crypto_deposit {
