@@ -1,37 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crypto Balance System
 
-## Getting Started
+A USDC balance system on the Polygon network. Users can sign up, top up their balance by sending USDC to a one-time deposit address, and withdraw to any Polygon address. The server watches the chain, credits deposits once their block is finalized, sweeps the funds into the app's main wallet, and can process withdrawals from it.
 
-First, run the development server:
+## Tech stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| Area | Technology | Used for |
+| --- | --- | --- |
+| Framework | Next.js 16, React 19, TypeScript | App Router pages and route handlers |
+| Styling | Tailwind CSS 4 | UI |
+| Database | PostgreSQL, Prisma 7 (`@prisma/adapter-pg`) | Users, deposits, withdrawals, ledger |
+| Auth | NextAuth, bcrypt | Credentials login, JWT sessions, password hashing |
+| Blockchain | viem | Polygon RPC calls, HD wallet derivation, USDC transfers |
+
+## How it works
+
+### Deposits
+
+1. The user enters an amount (minimum of 1 USDC). The server then derives a new address from a HD wallet (`DEPOSIT_MNEMONIC`, next index from a global counter) and gives it 30 minutes to be paid. If the user already has an unexpired pending address, it is reused to save on addresses.
+2. The deposit page shows a QR code, the address, the amount and a countdown, and polls the deposit's status every second.
+3. **Detection** (`/api/cron/process-deposits`) reads USDC `Transfer` logs sent to watched addresses, up to 2,000 blocks per run from where the last run stopped.
+   - A transfer in a block that is not finalized yet marks the deposit `detected`.
+   - Once the block is finalized, the balance is credited with the amount actually received. Each transfer is credited once, keyed on `(txHash, logIndex)`.
+   - Transfers under 1 USDC are ignored. An address stays watched for 3 days after it expires, so late or repeated payments are still credited.
+4. **Sweep** (`/api/cron/sweep-deposits`) moves the USDC from each credited deposit address to the main wallet. If the address doesn't hold enough POL for gas, the main wallet sends it the exact estimated amount first.
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: address created
+    pending --> detected: transfer seen, block not final
+    detected --> pending: transfer dropped by a reorg
+    detected --> confirmed: block finalized, balance credited
+    pending --> confirmed: transfer already final when seen
+    pending --> expired: 30 minutes, no transfer
+    expired --> confirmed: late transfer
+    confirmed --> swept: USDC moved to main wallet
+    swept --> confirmed: address paid again
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Withdrawals
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The user enters an amount (minimum 1 USDC) and a destination address. A 2% fee is taken: the balance is debited the full amount, the destination receives the rest, and the fee goes to the profit wallet. If the transfer can't be sent or reverts on chain, the withdrawal is marked `failed` and the balance is refunded in the same database transaction.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Ledger
 
-## Learn More
+The finance page shows the current balance and the 50 most recent ledger entries (swept deposits and completed withdrawals).
 
-To learn more about Next.js, take a look at the following resources:
+## Design notes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
+- **No floating point money.** Amounts are `BigInt` USDC base units (6 decimals) everywhere, stored as Postgres `BIGINT`. User input is parsed from a string with a strict regex.
+- **One address per deposit.** Each deposit gets its own derived address, so an incoming transfer maps to a user without memos or amount matching.
+- **Only finalized blocks are credited.** A reorg can't credit funds that later disappear. Unfinalized transfers are shown as `detected` so the user still gets feedback.
+- **Exactly-once crediting.** Each credited transfer is a `deposit_transfer` row with a unique `(txHash, logIndex)`. The row and the balance increment are written in one transaction, so re-scanning the same blocks credits nothing twice.
+- **No overdrafts.** A withdrawal debits the balance with a conditional `UPDATE ... WHERE balance >= amount`, so concurrent withdrawals can't spend the same funds.
+- **Row locks in a fixed order.** Deposit creation locks the user row (`SELECT ... FOR UPDATE`); crediting locks the user row before the deposit row, the same order, so the two can't deadlock.
+- **Crash-safe sweeps.** A sweep claims a deposit with an atomic compare-and-set on `sweepStartedAt`. A claim older than 5 minutes is assumed crashed and can be taken over. The on-chain balance is checked before sending, so a run that moved the funds but died before saving isn't repeated.
